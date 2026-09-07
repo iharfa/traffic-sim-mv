@@ -46,6 +46,9 @@ export class Sim {
     for (const e of net.ped.edges) { this.addPedDir(e, false); this.addPedDir(e, true); }
     for (const de of this.pdes) de.outs = (this.pout.get(de.to) || []);
 
+    this.nodeDeg = [];       // undirected edge count per node (3+ = real junction)
+    for (const e of net.veh.edges) for (const n of [e.a, e.b]) this.nodeDeg[n] = (this.nodeDeg[n] || 0) + 1;
+
     this.signals = [];       // {node, lon, lat, axis, t}
     this.targets = {}; for (const k in TYPES) this.targets[k] = TYPES[k].dflt;
     this.pedTarget = 200;
@@ -143,7 +146,7 @@ export class Sim {
       const pos = Math.random() * Math.max(1, de.len - t.len);
       const lane = (Math.random() * de.lanes) | 0;
       if (this.vehicles.some(v => v.de === de && v.lane === lane && Math.abs(v.pos - pos) < t.len + v.t.len + 3)) continue;
-      const v = { type, t, de, pos, lane, v: de.vmax * (0.4 + Math.random() * 0.4), next: this.nextEdge(de), seg: 0, vf: 0.85 + Math.random() * 0.3 };
+      const v = { type, t, de, pos, lane, v: de.vmax * (0.4 + Math.random() * 0.4), next: this.nextEdge(de), seg: 0, vf: 0.85 + Math.random() * 0.3, prev: null };
       this.vehicles.push(v);
       return true;
     }
@@ -180,6 +183,21 @@ export class Sim {
 
     const sigByNode = new Map(this.signals.map(s => [s.node, s]));
 
+    // junction boxes (unsignalized, degree>=3): stateless per-tick claims.
+    // occ: a vehicle currently inside the box (first 6 m past the node) and the
+    // approach it came from; intent: the nearest approaching vehicle per node.
+    const occ = new Map(), intent = new Map();
+    for (const v of this.vehicles) {
+      const from = v.de.from;
+      if (v.prev && v.prev.to === from && v.pos < 6 && this.nodeDeg[from] >= 3 && !sigByNode.has(from) && !occ.has(from))
+        occ.set(from, v.prev);
+      const N = v.de.to, rem = v.de.len - v.pos;
+      if (rem < 12 && this.nodeDeg[N] >= 3 && !sigByNode.has(N)) {
+        const cur = intent.get(N);
+        if (!cur || rem < cur.rem) intent.set(N, { de: v.de, rem });
+      }
+    }
+
     for (const v of this.vehicles) {
       const de = v.de, q = de.q;
       // leader in same lane on this edge
@@ -199,6 +217,14 @@ export class Sim {
       if (s && this.signalState(s, de) === 'r') {
         const stopGap = de.len - v.pos - 1;
         if (stopGap < gap && stopGap > -2) { gap = Math.max(stopGap, 0.01); dv = v.v; }
+      } else if (!s && this.nodeDeg[de.to] >= 3 && de.len - v.pos < 12) {
+        // yield at the junction box: someone is crossing from another approach,
+        // or a closer vehicle from another approach has priority
+        const o = occ.get(de.to), it = intent.get(de.to);
+        if ((o && o !== de) || (it && it.de !== de)) {
+          const stopGap = de.len - v.pos - 1.5;
+          if (stopGap < gap && stopGap > -1) { gap = Math.max(stopGap, 0.01); dv = v.v; }
+        }
       }
       // IDM
       const t = v.t;
@@ -209,14 +235,19 @@ export class Sim {
       v.pos += v.v * dt;
     }
 
-    // edge transitions
+    // edge transitions (blocked if the entry of the target lane is occupied)
     for (const v of this.vehicles) {
       let guard = 0;
       while (v.pos >= v.de.len && guard++ < 4) {
         if (!v.next) { v.pos = v.de.len - 0.1; v.v = 0; break; }
-        v.pos -= v.de.len;
-        v.de = v.next;
-        v.lane = v.lane % v.de.lanes;
+        const t = v.next, lane = v.lane % t.lanes, over = v.pos - v.de.len;
+        if (t.q.some(o => o !== v && o.lane === lane && o.pos - over < o.t.len + 1.5)) {
+          v.pos = v.de.len - 0.05; v.v = 0; break;
+        }
+        v.prev = v.de;
+        v.pos = over;
+        v.de = t;
+        v.lane = lane;
         v.next = this.nextEdge(v.de);
         v.seg = 0;
       }
@@ -238,11 +269,12 @@ export class Sim {
     this.manageCounts();
   }
 
-  // world position + heading for an entity on a directed edge
-  locate(ent) {
+  // world position + heading for an entity on a directed edge.
+  // extra = render-time extrapolation (leftover fixed-step accumulator × speed)
+  locate(ent, extra = 0) {
     const { geo, cum } = ent.de;
     let s = ent.seg || 0;
-    const pos = Math.min(ent.pos, cum[cum.length - 1]);
+    const pos = Math.min(ent.pos + extra, cum[cum.length - 1]);
     while (s < cum.length - 2 && cum[s + 1] < pos) s++;
     while (s > 0 && cum[s] > pos) s--;
     ent.seg = s;

@@ -69,11 +69,13 @@ function render() {
   const ppm = Math.hypot(p1.x - p0.x, p1.y - p0.y) / (0.0005 * 111320 * Math.cos(c.lat * Math.PI / 180));
   const mapBrg = map.getBearing() * Math.PI / 180;
 
+  const ex = running ? acc : 0; // extrapolate the leftover fixed-step time for 60 fps motion
+
   // pedestrians
   ctx.fillStyle = '#ffffff';
   const pr = Math.max(1.1, 0.3 * ppm);
   for (const p of sim.peds) {
-    const l = sim.locate(p);
+    const l = sim.locate(p, p.v * ex);
     const s = map.project([l.lon, l.lat]);
     if (s.x < -20 || s.y < -20 || s.x > cv.clientWidth + 20 || s.y > cv.clientHeight + 20) continue;
     const ang = l.hdg - mapBrg, tx = Math.sin(ang), ty = -Math.cos(ang);
@@ -83,10 +85,15 @@ function render() {
 
   // vehicles
   for (const v of sim.vehicles) {
-    const l = sim.locate(v);
+    const l = sim.locate(v, v.v * ex);
     const s = map.project([l.lon, l.lat]);
     if (s.x < -30 || s.y < -30 || s.x > cv.clientWidth + 30 || s.y > cv.clientHeight + 30) continue;
-    const ang = l.hdg - mapBrg, tx = Math.sin(ang), ty = -Math.cos(ang);
+    if (v._hdg === undefined) v._hdg = l.hdg;
+    else {
+      const dh = ((l.hdg - v._hdg + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      v._hdg = ((v._hdg + dh * 0.25 + Math.PI * 3) % (Math.PI * 2)) - Math.PI; // ease heading changes
+    }
+    const ang = v._hdg - mapBrg, tx = Math.sin(ang), ty = -Math.cos(ang);
     const de = v.de;
     let lat = (de.twoWay ? de.width / 4 : 0) + (v.lane - (de.lanes - 1) / 2) * 2.8;
     lat = Math.min(lat, de.width / 2 - 0.9);
