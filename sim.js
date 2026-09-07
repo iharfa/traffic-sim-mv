@@ -197,11 +197,11 @@ export class Sim {
     for (const v of this.vehicles) {
       const from = v.de.from;
       if (v.prev && v.prev.to === from && v.pos < (this.boxRad[from] || 2) + v.t.len && this.nodeDeg[from] >= 3 && !sigByNode.has(from) && !occ.has(from))
-        occ.set(from, v.prev);
+        occ.set(from, { ap: v.prev, v });
       const N = v.de.to, rem = v.de.len - v.pos;
       if (rem < (this.boxRad[N] || 2) + 12 && this.nodeDeg[N] >= 3 && !sigByNode.has(N)) {
         const cur = intent.get(N);
-        if (!cur || rem < cur.rem) intent.set(N, { de: v.de, rem });
+        if (!cur || rem < cur.rem) intent.set(N, { de: v.de, rem, v });
       }
     }
 
@@ -230,8 +230,10 @@ export class Sim {
       } else if (!s && this.nodeDeg[de.to] >= 3 && de.len - v.pos < bR + 12) {
         // yield at the junction box: someone is crossing from another approach,
         // or a closer vehicle from another approach has priority
+        // a claimant that has been stopped for a while is itself blocked —
+        // ignore its priority so the junction doesn't freeze (anti-gridlock)
         const o = occ.get(de.to), it = intent.get(de.to);
-        if ((o && o !== de) || (it && it.de !== de)) {
+        if ((o && o.ap !== de && (o.v.wait || 0) < 6) || (it && it.de !== de && (it.v.wait || 0) < 4)) {
           const stopGap = stopPos - v.pos;
           if (stopGap < gap && stopGap > -0.5) { gap = Math.max(stopGap, 0.01); dv = v.v; }
         }
@@ -243,6 +245,7 @@ export class Sim {
       const acc = t.a * (1 - Math.pow(v.v / vdes, 4) - (gap < 1e8 ? (sStar / Math.max(gap, 0.1)) ** 2 : 0));
       v.v = Math.max(0, v.v + acc * dt);
       v.pos += v.v * dt;
+      if (v.v < 0.15) v.wait = (v.wait || 0) + dt; else v.wait = 0;
     }
 
     // edge transitions (blocked if the entry of the target lane is occupied)
@@ -265,6 +268,15 @@ export class Sim {
         t.q.push(v); // visible to same-tick entries from other approaches
       }
     }
+
+    // gridlock breaker: recycle vehicles that haven't moved for a long time
+    // (longer allowance in signal queues, where long waits are legitimate)
+    const stuck = [];
+    this.vehicles = this.vehicles.filter(v => {
+      if ((v.wait || 0) > (sigByNode.has(v.de.to) ? 90 : 30)) { stuck.push(v.type); return false; }
+      return true;
+    });
+    for (const ty of stuck) this.spawnVehicle(ty);
 
     // pedestrians
     for (const p of this.peds) {
