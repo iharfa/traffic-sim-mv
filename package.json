@@ -1,0 +1,24 @@
+{
+  "name": "traffic-sim-mv",
+  "version": "1.0.0",
+  "description": "Live traffic microsimulation for the Greater Malé Region — currently **Hulhumalé Phase 1 + 2**, with Malé to follow.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iharfa/traffic-sim-mv.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/iharfa/traffic-sim-mv/issues"
+  },
+  "homepage": "https://github.com/iharfa/traffic-sim-mv#readme",
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

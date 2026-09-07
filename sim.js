@@ -170,14 +170,14 @@ export class Sim {
     for (const k in TYPES) {
       const tgt = Math.round(this.targets[k] * this.mult);
       let d = tgt - count[k];
-      for (let i = 0; i < Math.min(d, 25); i++) this.spawnVehicle(k);
+      for (let i = 0; i < Math.min(d, 60); i++) this.spawnVehicle(k);
       if (d < 0) {
         let rm = -d;
         this.vehicles = this.vehicles.filter(v => v.type !== k || rm-- <= 0);
       }
     }
     const pt = Math.round(this.pedTarget * this.mult);
-    for (let i = 0; i < Math.min(pt - this.peds.length, 40); i++) this.spawnPed();
+    for (let i = 0; i < Math.min(pt - this.peds.length, 100); i++) this.spawnPed();
     if (this.peds.length > pt) this.peds.length = pt;
   }
 
@@ -205,12 +205,12 @@ export class Sim {
       }
     }
 
-    for (const v of this.vehicles) {
+    for (const de0 of this.des) for (let qi = 0; qi < de0.q.length; qi++) {
+      const v = de0.q[qi];
       const de = v.de, q = de.q;
-      // leader in same lane on this edge
+      // leader in same lane on this edge (queues are pos-sorted, so scan forward)
       let gap = 1e9, dv = 0;
-      const i = q.indexOf(v);
-      for (let j = i + 1; j < q.length; j++) {
+      for (let j = qi + 1; j < q.length; j++) {
         if (q[j].lane === v.lane) { gap = q[j].pos - q[j].t.len - v.pos; dv = v.v - q[j].v; break; }
       }
       if (gap > 1e8 && v.next) { // look across the junction

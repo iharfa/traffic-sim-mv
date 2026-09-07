@@ -28,7 +28,7 @@ const map = new maplibregl.Map({
   attributionControl: { compact: true },
 });
 map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
-window.map = map;
+window.map = map; window.sim = sim;
 
 map.on('load', () => {
   for (const [id, src] of Object.entries(RASTERS)) {
@@ -177,7 +177,7 @@ const save = () => localStorage.setItem('tsmv', JSON.stringify({
   signals: sim.signals.map(s => [s.lon, s.lat]),
 }));
 
-const MAXES = { motorcycle: 1500, car: 600, taxi: 300, pickup: 200, lorry: 100, bus: 50, buggy: 100, bicycle: 300 };
+const MAXES = { motorcycle: 6000, car: 2500, taxi: 1000, pickup: 800, lorry: 400, bus: 200, buggy: 400, bicycle: 1200 };
 const typesEl = document.getElementById('types');
 const lastOn = {};
 for (const [k, t] of Object.entries(TYPES)) {

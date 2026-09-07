@@ -4,6 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Traffic Sim MV</title>
+<meta name="description" content="Live traffic microsimulation of the Greater Malé Region on Hulhumalé's real HDC road network — tune vehicle numbers by type, add pedestrians, mark one-way streets and place traffic signals.">
+<meta property="og:title" content="Traffic Sim MV">
+<meta property="og:description" content="Live traffic microsimulation of the Greater Malé Region. Motorcycles, cars and buses flow through Hulhumalé's real HDC road network — tune the traffic, mark one-way streets, place signals.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://traffic-sim-mv.vercel.app/">
+<meta property="og:image" content="https://traffic-sim-mv.vercel.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Traffic Sim MV">
+<meta name="twitter:description" content="Live traffic microsimulation of the Greater Malé Region on Hulhumalé's real HDC road network.">
+<meta name="twitter:image" content="https://traffic-sim-mv.vercel.app/og.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛵</text></svg>">
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
@@ -74,10 +86,10 @@
 
   <div class="sec">
     <h2>Traffic volume</h2>
-    <div class="row"><label>Density</label><input type="range" id="mult" min="0" max="300" value="100"><span class="n" id="multn">100%</span></div>
+    <div class="row"><label>Density</label><input type="range" id="mult" min="0" max="500" value="100"><span class="n" id="multn">100%</span></div>
     <div id="types"></div>
     <div class="row"><label><span class="sw" style="background:#fff"></span>Pedestrians</label>
-      <input type="range" id="peds" min="0" max="1200" value="200"><span class="n" id="pedsn">200</span></div>
+      <input type="range" id="peds" min="0" max="4000" value="200"><span class="n" id="pedsn">200</span></div>
   </div>
 
   <div class="sec">
