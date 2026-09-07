@@ -43,6 +43,10 @@
   #stats b { color:var(--acc) }
   #collapse { position:absolute; top:6px; right:8px; background:none; border:none; color:var(--dim); cursor:pointer; font-size:14px }
   #panel.min > :not(h1):not(#collapse) { display:none }
+  #pop { position:absolute; z-index:6; width:210px; background:var(--panel); backdrop-filter:blur(10px);
+         border:1px solid var(--line); border-radius:10px; padding:10px; font-size:12px }
+  #pop select { background:#21262d; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:3px 6px }
+  #pop .ctrls { margin-top:6px }
   @media (max-width:600px){ #panel { width:calc(100% - 20px) } }
 </style>
 </head>
@@ -84,6 +88,12 @@
   </div>
 
   <div class="sec">
+    <h2>Roads</h2>
+    <div class="ctrls"><button id="editroads">✏️ Edit roads</button><button id="exportovr" title="Download your direction/lane edits as overrides.json">⬇ Edits</button></div>
+    <div class="hint">In edit mode, click a road to set its direction and lane count. Arrows mark one-way streets.</div>
+  </div>
+
+  <div class="sec">
     <h2>Basemap</h2>
     <select id="basemap">
       <option value="esri">Esri World Imagery</option>
@@ -94,6 +104,7 @@
   </div>
 </div>
 
+<div id="pop" hidden></div>
 <div id="stats">loading network…</div>
 <script type="module" src="app.js"></script>
 </body>

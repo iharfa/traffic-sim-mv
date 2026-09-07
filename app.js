@@ -11,6 +11,15 @@ const HW_COLOR = { primary: '#f8961e', tertiary: '#4cc9f0', tertiary_link: '#4cc
 const net = await (await fetch('data/network.json')).json();
 const sim = new Sim(net);
 
+// direction/lane overrides: committed file + this browser's edits on top
+const ekey = e => e.geo[0].join(',') + '|' + e.geo[e.geo.length - 1].join(',');
+const defaults = net.veh.edges.map(e => ({ ow: e.oneway || 0, lanes: e.lanes }));
+let fileOvr = {};
+try { const r = await fetch('data/overrides.json'); if (r.ok) fileOvr = await r.json(); } catch { }
+const overrides = { ...fileOvr, ...JSON.parse(localStorage.getItem('tsmv-ovr') || '{}') };
+net.veh.edges.forEach((e, i) => { const o = overrides[ekey(e)]; if (o) sim.configureEdge(i, o.ow ?? 0, o.lanes ?? e.lanes); });
+const saveOvr = () => localStorage.setItem('tsmv-ovr', JSON.stringify(overrides));
+
 // ---------- map ----------
 const map = new maplibregl.Map({
   container: 'map',
@@ -68,7 +77,7 @@ function render() {
     const s = map.project([l.lon, l.lat]);
     if (s.x < -20 || s.y < -20 || s.x > cv.clientWidth + 20 || s.y > cv.clientHeight + 20) continue;
     const ang = l.hdg - mapBrg, tx = Math.sin(ang), ty = -Math.cos(ang);
-    const off = p.side * 1.8 * ppm;
+    const off = p.side * (p.de.walkOff || 1.8) * ppm;
     ctx.beginPath(); ctx.arc(s.x + ty * off, s.y - tx * off, pr, 0, 7); ctx.fill();
   }
 
@@ -90,6 +99,29 @@ function render() {
     ctx.fillRect(-wpx / 2, -lpx / 2, wpx, lpx);
     if (lpx > 9) { ctx.fillStyle = '#0d1117aa'; ctx.fillRect(-wpx / 2, -lpx / 2, wpx, lpx * 0.22); } // windshield hint
     ctx.restore();
+  }
+
+  // road editor decorations
+  if (editing) {
+    if (selIdx >= 0) {
+      const g = net.veh.edges[selIdx].geo;
+      ctx.strokeStyle = '#4cc9f0'; ctx.lineWidth = 4; ctx.beginPath();
+      g.forEach((c, i) => { const s = map.project(c); i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); });
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#4cc9f0';
+    for (const e of net.veh.edges) {
+      if (!e.oneway) continue;
+      const g = e.geo, mi = Math.max(1, (g.length / 2) | 0);
+      const a = g[mi - 1], b = g[mi];
+      const s = map.project([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+      if (s.x < 0 || s.y < 0 || s.x > cv.clientWidth || s.y > cv.clientHeight) continue;
+      let ang = Math.atan2(b[0] - a[0], (b[1] - a[1]) / Math.cos(4.21 * Math.PI / 180)) - mapBrg;
+      if (e.oneway === -1) ang += Math.PI;
+      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(ang);
+      ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(5, 4); ctx.lineTo(-5, 4); ctx.fill();
+      ctx.restore();
+    }
   }
 
   // signals
@@ -178,6 +210,66 @@ document.getElementById('roads').onchange = e =>
 const collapse = document.getElementById('collapse'), panel = document.getElementById('panel');
 collapse.onclick = () => { panel.classList.toggle('min'); collapse.textContent = panel.classList.contains('min') ? '▸' : '▾'; };
 
+// ---------- road editor ----------
+let editing = false, selIdx = -1;
+const editBtn = document.getElementById('editroads'), pop = document.getElementById('pop');
+const MXm = lon => (lon - 73.54) * 111320 * Math.cos(4.21 * Math.PI / 180), MYm = lat => (lat - 4.21) * 111320;
+
+function nearestEdgeIdx(ll) {
+  const p = [MXm(ll.lng), MYm(ll.lat)];
+  let best = -1, bd = 15 * 15;
+  net.veh.edges.forEach((e, i) => {
+    for (let j = 1; j < e.geo.length; j++) {
+      const a = [MXm(e.geo[j - 1][0]), MYm(e.geo[j - 1][1])], b = [MXm(e.geo[j][0]), MYm(e.geo[j][1])];
+      const abx = b[0] - a[0], aby = b[1] - a[1], L2 = abx * abx + aby * aby || 1e-9;
+      const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / L2));
+      const dx = p[0] - a[0] - t * abx, dy = p[1] - a[1] - t * aby, dd = dx * dx + dy * dy;
+      if (dd < bd) { bd = dd; best = i; }
+    }
+  });
+  return best;
+}
+
+function showPop(i, px) {
+  selIdx = i;
+  const e = net.veh.edges[i];
+  pop.innerHTML = `<b>${e.name || 'unnamed road'}</b>
+    <div class="hint">${e.width} m carriageway${e.phase ? ' · ' + e.phase : ''}</div>
+    <div class="row"><label>Direction</label><select id="poww">
+      <option value="0">⇆ Two-way</option><option value="1">One-way ▲</option><option value="-1">One-way ▼</option></select></div>
+    <div class="row"><label>Lanes</label><select id="poln"><option>1</option><option>2</option><option>3</option><option>4</option></select></div>
+    <div class="ctrls"><button id="porst">Reset</button><button id="pocls">Close</button></div>`;
+  const ow = pop.querySelector('#poww'), ln = pop.querySelector('#poln');
+  ow.value = String(e.oneway || 0); ln.value = String(e.lanes);
+  const apply = () => {
+    sim.configureEdge(i, +ow.value, +ln.value);
+    overrides[ekey(e)] = { ow: +ow.value, lanes: +ln.value };
+    saveOvr();
+  };
+  ow.onchange = apply; ln.onchange = apply;
+  pop.querySelector('#porst').onclick = () => {
+    delete overrides[ekey(e)]; saveOvr();
+    sim.configureEdge(i, defaults[i].ow, defaults[i].lanes);
+    ow.value = String(defaults[i].ow); ln.value = String(defaults[i].lanes);
+  };
+  pop.querySelector('#pocls').onclick = () => { pop.hidden = true; selIdx = -1; };
+  pop.style.left = Math.min(px.x + 12, innerWidth - 230) + 'px';
+  pop.style.top = Math.min(px.y + 12, innerHeight - 190) + 'px';
+  pop.hidden = false;
+}
+
+editBtn.onclick = () => {
+  editing = !editing;
+  editBtn.classList.toggle('on', editing);
+  if (!editing) { pop.hidden = true; selIdx = -1; }
+  map.getCanvas().style.cursor = editing ? 'pointer' : '';
+};
+document.getElementById('exportovr').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(overrides, null, 1)], { type: 'application/json' }));
+  a.download = 'overrides.json'; a.click();
+};
+
 // ---------- signals ----------
 let placing = false;
 const addsig = document.getElementById('addsig'), sighint = document.getElementById('sighint'), siglist = document.getElementById('siglist');
@@ -210,6 +302,11 @@ addsig.onclick = () => {
   map.getCanvas().style.cursor = placing ? 'crosshair' : '';
 };
 map.on('click', e => {
+  if (editing && !placing) {
+    const i = nearestEdgeIdx(e.lngLat);
+    if (i >= 0) showPop(i, e.point); else { pop.hidden = true; selIdx = -1; }
+    return;
+  }
   if (!placing) return;
   const node = nearestJunction(e.lngLat);
   if (node != null && sim.addSignal(node)) { refreshSigs(); save(); }

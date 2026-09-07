@@ -30,19 +30,22 @@ export class Sim {
     this.net = net;
     this.des = [];           // directed edges
     this.out = new Map();    // nodeIdx -> [directed edge]
-    for (const e of net.veh.edges) {
-      this.addDir(e, false);
-      if (!e.oneway) this.addDir(e, true);
-    }
+    this.vehicles = [];
+    this.peds = [];
+    this.edgeDirs = []; // per undirected edge: both directions, toggled via configureEdge
+    net.veh.edges.forEach((e, i) => {
+      const f = this.addDir(e, false), r = this.addDir(e, true);
+      f.twin = r; r.twin = f; f.eIdx = r.eIdx = i;
+      this.edgeDirs.push({ e, f, r });
+    });
     for (const de of this.des) de.outs = (this.out.get(de.to) || []);
+    net.veh.edges.forEach((e, i) => this.configureEdge(i, e.oneway || 0, e.lanes));
 
     this.pdes = [];
     this.pout = new Map();
     for (const e of net.ped.edges) { this.addPedDir(e, false); this.addPedDir(e, true); }
     for (const de of this.pdes) de.outs = (this.pout.get(de.to) || []);
 
-    this.vehicles = [];
-    this.peds = [];
     this.signals = [];       // {node, lon, lat, axis, t}
     this.targets = {}; for (const k in TYPES) this.targets[k] = TYPES[k].dflt;
     this.pedTarget = 200;
@@ -56,8 +59,7 @@ export class Sim {
       id: this.des.length, geo, cum: cumulate(geo, this.mx, this.my), len: e.len,
       from: rev ? e.b : e.a, to: rev ? e.a : e.b,
       vmax: e.speed / 3.6, hw: e.hw, name: e.name, width: e.width,
-      lanes: Math.max(1, e.oneway ? e.lanes : Math.ceil(e.lanes / 2)),
-      twoWay: !e.oneway, rank: RANK[e.hw] || 2, q: [],
+      lanes: 1, twoWay: true, disabled: false, rank: RANK[e.hw] || 2, q: [],
     };
     this.des.push(de);
     if (!this.out.has(de.from)) this.out.set(de.from, []);
@@ -66,10 +68,24 @@ export class Sim {
   }
   addPedDir(e, rev) {
     const geo = rev ? [...e.geo].reverse() : e.geo;
-    const de = { geo, cum: cumulate(geo, this.mx, this.my), len: e.len, from: rev ? e.b : e.a, to: rev ? e.a : e.b };
+    const de = { geo, cum: cumulate(geo, this.mx, this.my), len: e.len, from: rev ? e.b : e.a, to: rev ? e.a : e.b, walkOff: (e.width || 2) / 2 + 1 };
     this.pdes.push(de);
     if (!this.pout.has(de.from)) this.pout.set(de.from, []);
     this.pout.get(de.from).push(de);
+  }
+
+  // ow: 0 two-way, 1 one-way along stored geometry, -1 one-way against it. lanes = total.
+  configureEdge(i, ow, lanes) {
+    const { e, f, r } = this.edgeDirs[i];
+    e.oneway = ow; e.lanes = lanes;
+    f.disabled = ow === -1; r.disabled = ow === 1;
+    f.lanes = r.lanes = Math.max(1, ow === 0 ? Math.ceil(lanes / 2) : lanes);
+    f.twoWay = r.twoWay = ow === 0;
+    this.vehicles = this.vehicles.filter(v => !v.de.disabled);
+    for (const v of this.vehicles) {
+      v.lane = v.lane % v.de.lanes;
+      if (v.next && v.next.disabled) v.next = this.nextEdge(v.de);
+    }
   }
 
   bearingIn(de) { // approach bearing at edge end, degrees
@@ -99,11 +115,11 @@ export class Sim {
     return mine ? 'g' : 'r';
   }
 
-  nextEdge(de, prevFrom) {
-    const outs = de.outs;
-    if (!outs.length) return null;
-    const cand = outs.filter(o => o.to !== de.from);
-    const pool = cand.length ? cand : outs;
+  nextEdge(de) {
+    const open = de.outs.filter(o => !o.disabled);
+    if (!open.length) return de.twin || null; // forced u-turn at a dead end
+    const cand = open.filter(o => o.to !== de.from);
+    const pool = cand.length ? cand : open;
     let tot = 0; for (const o of pool) tot += o.rank * o.rank;
     let r = Math.random() * tot;
     for (const o of pool) { r -= o.rank * o.rank; if (r <= 0) return o; }
@@ -114,6 +130,7 @@ export class Sim {
     const t = TYPES[type];
     for (let tries = 0; tries < 12; tries++) {
       const de = this.des[(Math.random() * this.des.length) | 0];
+      if (de.disabled) continue;
       if (de.hw === 'service' && Math.random() < 0.5) continue;
       const pos = Math.random() * Math.max(1, de.len - t.len);
       const lane = (Math.random() * de.lanes) | 0;
