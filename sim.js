@@ -47,7 +47,11 @@ export class Sim {
     for (const de of this.pdes) de.outs = (this.pout.get(de.to) || []);
 
     this.nodeDeg = [];       // undirected edge count per node (3+ = real junction)
-    for (const e of net.veh.edges) for (const n of [e.a, e.b]) this.nodeDeg[n] = (this.nodeDeg[n] || 0) + 1;
+    this.boxRad = [];        // junction box radius: half the widest road at the node
+    for (const e of net.veh.edges) for (const n of [e.a, e.b]) {
+      this.nodeDeg[n] = (this.nodeDeg[n] || 0) + 1;
+      this.boxRad[n] = Math.max(this.boxRad[n] || 0, Math.min(e.width, 16) / 2 + 1.5);
+    }
 
     this.signals = [];       // {node, lon, lat, axis, t}
     this.targets = {}; for (const k in TYPES) this.targets[k] = TYPES[k].dflt;
@@ -143,7 +147,10 @@ export class Sim {
       const de = this.des[(Math.random() * this.des.length) | 0];
       if (de.disabled) continue;
       if (de.hw === 'service' && Math.random() < 0.5) continue;
-      const pos = Math.random() * Math.max(1, de.len - t.len);
+      // spawn clear of both junction boxes
+      const m0 = (this.boxRad[de.from] || 2) + t.len, m1 = (this.boxRad[de.to] || 2) + t.len;
+      if (de.len < m0 + m1 + 4) continue;
+      const pos = m0 + Math.random() * (de.len - m0 - m1 - 4);
       const lane = (Math.random() * de.lanes) | 0;
       if (this.vehicles.some(v => v.de === de && v.lane === lane && Math.abs(v.pos - pos) < t.len + v.t.len + 3)) continue;
       const v = { type, t, de, pos, lane, v: de.vmax * (0.4 + Math.random() * 0.4), next: this.nextEdge(de), seg: 0, vf: 0.85 + Math.random() * 0.3, prev: null };
@@ -189,10 +196,10 @@ export class Sim {
     const occ = new Map(), intent = new Map();
     for (const v of this.vehicles) {
       const from = v.de.from;
-      if (v.prev && v.prev.to === from && v.pos < 6 && this.nodeDeg[from] >= 3 && !sigByNode.has(from) && !occ.has(from))
+      if (v.prev && v.prev.to === from && v.pos < (this.boxRad[from] || 2) + v.t.len && this.nodeDeg[from] >= 3 && !sigByNode.has(from) && !occ.has(from))
         occ.set(from, v.prev);
       const N = v.de.to, rem = v.de.len - v.pos;
-      if (rem < 12 && this.nodeDeg[N] >= 3 && !sigByNode.has(N)) {
+      if (rem < (this.boxRad[N] || 2) + 12 && this.nodeDeg[N] >= 3 && !sigByNode.has(N)) {
         const cur = intent.get(N);
         if (!cur || rem < cur.rem) intent.set(N, { de: v.de, rem });
       }
@@ -212,18 +219,21 @@ export class Sim {
         for (const o of nq) if (o.lane === v.lane % v.next.lanes && (!best || o.pos < best.pos)) best = o;
         if (best) { gap = (de.len - v.pos) + best.pos - best.t.len; dv = v.v - best.v; }
       }
-      // signal at edge end
+      // stop line set back by the junction box radius, so waiting vehicles
+      // hold clear of the crossing road instead of inside it
+      const bR = this.boxRad[de.to] || 2;
+      const stopPos = Math.max(1, de.len - bR - v.t.len / 2);
       const s = sigByNode.get(de.to);
       if (s && this.signalState(s, de) === 'r') {
-        const stopGap = de.len - v.pos - 1;
+        const stopGap = stopPos - v.pos;
         if (stopGap < gap && stopGap > -2) { gap = Math.max(stopGap, 0.01); dv = v.v; }
-      } else if (!s && this.nodeDeg[de.to] >= 3 && de.len - v.pos < 12) {
+      } else if (!s && this.nodeDeg[de.to] >= 3 && de.len - v.pos < bR + 12) {
         // yield at the junction box: someone is crossing from another approach,
         // or a closer vehicle from another approach has priority
         const o = occ.get(de.to), it = intent.get(de.to);
         if ((o && o !== de) || (it && it.de !== de)) {
-          const stopGap = de.len - v.pos - 1.5;
-          if (stopGap < gap && stopGap > -1) { gap = Math.max(stopGap, 0.01); dv = v.v; }
+          const stopGap = stopPos - v.pos;
+          if (stopGap < gap && stopGap > -0.5) { gap = Math.max(stopGap, 0.01); dv = v.v; }
         }
       }
       // IDM
@@ -242,7 +252,9 @@ export class Sim {
         if (!v.next) { v.pos = v.de.len - 0.1; v.v = 0; break; }
         const t = v.next, lane = v.lane % t.lanes, over = v.pos - v.de.len;
         if (t.q.some(o => o !== v && o.lane === lane && o.pos - over < o.t.len + 1.5)) {
-          v.pos = v.de.len - 0.05; v.v = 0; break;
+          // hold at the stop line, clear of the box, until the entry frees up
+          v.pos = Math.max(1, v.de.len - (this.boxRad[v.de.to] || 2) - v.t.len / 2);
+          v.v = 0; break;
         }
         v.prev = v.de;
         v.pos = over;
@@ -250,6 +262,7 @@ export class Sim {
         v.lane = lane;
         v.next = this.nextEdge(v.de);
         v.seg = 0;
+        t.q.push(v); // visible to same-tick entries from other approaches
       }
     }
 
