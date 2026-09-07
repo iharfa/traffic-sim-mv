@@ -90,7 +90,8 @@ function render() {
     const de = v.de;
     let lat = (de.twoWay ? de.width / 4 : 0) + (v.lane - (de.lanes - 1) / 2) * 2.8;
     lat = Math.min(lat, de.width / 2 - 0.9);
-    const off = lat * ppm;
+    v._off = v._off === undefined ? lat : v._off + (lat - v._off) * 0.08; // ease sideways shifts
+    const off = v._off * ppm;
     const x = s.x + ty * off, y = s.y - tx * off;
     const lpx = Math.max(2.6, v.t.len * ppm), wpx = Math.max(1.6, v.t.w * ppm);
     ctx.save();

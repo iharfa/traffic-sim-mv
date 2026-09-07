@@ -61,6 +61,9 @@ export class Sim {
       vmax: e.speed / 3.6, hw: e.hw, name: e.name, width: e.width,
       lanes: 1, twoWay: true, disabled: false, rank: RANK[e.hw] || 2, q: [],
     };
+    const g = de.geo, n = g.length;
+    de.b0 = Math.atan2(this.mx(g[1][0]) - this.mx(g[0][0]), this.my(g[1][1]) - this.my(g[0][1]));
+    de.b1 = Math.atan2(this.mx(g[n - 1][0]) - this.mx(g[n - 2][0]), this.my(g[n - 1][1]) - this.my(g[n - 2][1]));
     this.des.push(de);
     if (!this.out.has(de.from)) this.out.set(de.from, []);
     this.out.get(de.from).push(de);
@@ -120,9 +123,14 @@ export class Sim {
     if (!open.length) return de.twin || null; // forced u-turn at a dead end
     const cand = open.filter(o => o.to !== de.from);
     const pool = cand.length ? cand : open;
-    let tot = 0; for (const o of pool) tot += o.rank * o.rank;
+    // strongly prefer continuing straight and staying on bigger roads
+    const w = pool.map(o => {
+      const cont = 1.15 + Math.cos(o.b0 - de.b1); // 2.15 straight … 0.15 u-turn
+      return o.rank * o.rank * cont * cont * cont;
+    });
+    let tot = 0; for (const x of w) tot += x;
     let r = Math.random() * tot;
-    for (const o of pool) { r -= o.rank * o.rank; if (r <= 0) return o; }
+    for (let i = 0; i < pool.length; i++) { r -= w[i]; if (r <= 0) return pool[i]; }
     return pool[pool.length - 1];
   }
 

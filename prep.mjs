@@ -180,6 +180,20 @@ for (const l of lines) {
   }
 }
 
+// one street = one width: median the per-segment measurements by road name so
+// lanes/offsets don't hop between consecutive segments of the same street
+const byName = {};
+for (const e of edges) if (e.name) (byName[e.name] = byName[e.name] || []).push(e.width);
+for (const e of edges) {
+  if (!e.name || byName[e.name].length < 2) continue;
+  const ws = [...byName[e.name]].sort((a, b) => a - b);
+  const w = ws[(ws.length / 2) | 0];
+  e.width = w;
+  if (e.hw !== 'primary' || w < 14) e.hw = w >= 14 ? 'primary' : w >= 10 ? 'tertiary' : w >= 6 ? 'residential' : 'service';
+  e.speed = e.hw === 'primary' ? (e.speed === 50 ? 50 : 40) : w >= 10 ? 30 : 25;
+  e.lanes = w >= 14 ? 4 : w >= 6 ? 2 : 1;
+}
+
 // pedestrians walk the same streets (sidewalk offset handled in the app); keep them off the bridge link
 const pedEdges = edges.filter(e => e.geo[0][0] > 73.5335 && e.geo[e.geo.length - 1][0] > 73.5335)
   .map(e => ({ a: e.a, b: e.b, len: e.len, geo: e.geo, width: e.width }));
